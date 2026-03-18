@@ -92,7 +92,6 @@ def dda(xi, yi, xf, yf, canvas_obj):
         y += Yincr
         colore(round(x), round(y), canvas_obj)
 
-
 def bresenham_reta(xi, yi, xf, yf, canvas_obj):
     x = xi
     y = yi
@@ -137,7 +136,6 @@ def bresenham_reta(xi, yi, xf, yf, canvas_obj):
 
             colore(x, y, canvas_obj)
 
-
 def bresenham_circunferencia(xc, yc, r, canvas_obj):
     x = 0
     y = r
@@ -161,6 +159,50 @@ def simetricos(a, b, xc, yc, canvas_obj):
     colore(-b + xc, a + yc, canvas_obj)
     colore(b + xc, -a + yc, canvas_obj)
     colore(-b + xc, -a + yc, canvas_obj)
+
+def cohen_sutherland(Xa, Ya, Xb, Yb):
+    aceite = False
+    feito = False
+    
+    while not feito:
+        codA = obtemCodigo(Xa, Ya)
+        codB = obtemCodigo(Xb, Yb)
+
+        if codA == 0 and codB == 0:
+            aceite = True
+            feito = True
+        
+        elif (codA & codB) != 0:
+            feito = True
+
+        else:
+            if codA != 0:
+                codTemp = codA
+            else:
+                codTemp = codB
+
+            if (verificaBit(codTemp, 0) == 1): #esquerda
+                Xint = Xmin
+                Yint = Ya + (Yb - Ya) * (Xmin - Xa) / (Xb - Xa)
+            elif (verificaBit(codTemp, 1) == 1): #direita
+                Xint = Xmax
+                Yint = Ya + (Yb - Ya) * (Xmax - Xa) / (Xb - Xa)
+            elif (verificaBit(codTemp, 2) == 1): #inferior
+                Yint = Ymin
+                Xint = Xa + (Xb - Xa) * (Ymin - Ya) / (Yb - Ya)
+            elif (verificaBit(codTemp, 3) == 1): #superior
+                Yint = Ymax
+                Xint = Xa + (Xb - Xa) * (Ymax - Ya) / (Yb - Ya)
+
+            if codTemp == codA:
+                Xa = Xint
+                Ya = Yint
+            else:
+                Xb = Xint
+                Yb = Yint
+        
+    if aceite:
+        desenha(round(Xa), round(Ya), round(Xb), round(Yb))
 
 def main():
     root = tk.Tk()
