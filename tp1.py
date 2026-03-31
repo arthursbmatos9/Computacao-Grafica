@@ -17,16 +17,38 @@ class PixelCanvas:
         self.mode = tk.StringVar(value="dda")
 
         self.canvas = tk.Canvas(root, width=CANVAS_WIDTH, height=CANVAS_HEIGHT, bg="white")
-        self.canvas.grid(row=0, column=0, columnspan=7)
+        self.canvas.grid(row=0, column=0, columnspan=10, sticky="ew")
         self.canvas.bind("<Button-1>", self.on_click)
 
-        tk.Radiobutton(root, text="DDA", variable=self.mode, value="dda").grid(row=1, column=0)
-        tk.Radiobutton(root, text="Bresenham Reta", variable=self.mode, value="bresenham_reta").grid(row=1, column=1)
-        tk.Radiobutton(root, text="Bresenham Círculo", variable=self.mode, value="bresenham_circ").grid(row=1, column=2)
-        tk.Radiobutton(root, text="Selecionar", variable=self.mode, value="selecionar").grid(row=2, column=4, columnspan=2)
+        # ── Linha 1: Algoritmos de rasterização | Janela | Ações ──────────────
+        # Grupo: Desenho
+        draw_frame = tk.LabelFrame(root, text="Desenho", padx=4, pady=2)
+        draw_frame.grid(row=1, column=0, columnspan=3, padx=4, pady=3, sticky="w")
 
-        tk.Button(root, text="Limpar", command=self.clear).grid(row=1, column=5)
-        tk.Button(root, text="Sair", command=root.quit).grid(row=1, column=6)
+        tk.Radiobutton(draw_frame, text="DDA",               variable=self.mode, value="dda").grid(row=0, column=0, padx=2)
+        tk.Radiobutton(draw_frame, text="Bresenham Reta",    variable=self.mode, value="bresenham_reta").grid(row=0, column=1, padx=2)
+        tk.Radiobutton(draw_frame, text="Bresenham Círculo", variable=self.mode, value="bresenham_circ").grid(row=0, column=2, padx=2)
+        tk.Radiobutton(draw_frame, text="Selecionar",        variable=self.mode, value="selecionar").grid(row=0, column=3, padx=6)
+
+        # Grupo: Clipping — janela
+        clip_win_frame = tk.LabelFrame(root, text="Janela de Clipping", padx=4, pady=2)
+        clip_win_frame.grid(row=1, column=3, columnspan=2, padx=4, pady=3, sticky="w")
+
+        self.define_btn = tk.Button(clip_win_frame, text="Definir", command=self.toggle_define_clip, width=7)
+        self.define_btn.grid(row=0, column=0, padx=2)
+        tk.Button(clip_win_frame, text="Reset", command=self.reset_clip_window, width=7).grid(row=0, column=1, padx=2)
+
+        # Grupo: Clipping — algoritmo
+        clip_algo_frame = tk.LabelFrame(root, text="Algoritmo de Clipping", padx=4, pady=2)
+        clip_algo_frame.grid(row=1, column=5, columnspan=3, padx=4, pady=3, sticky="w")
+
+        self.clip_algo = tk.StringVar(value="cohen")
+        tk.Radiobutton(clip_algo_frame, text="C. Sutherland", variable=self.clip_algo, value="cohen").grid(row=0, column=0, padx=2)
+        tk.Radiobutton(clip_algo_frame, text="L. Barsky",     variable=self.clip_algo, value="liang").grid(row=0, column=1, padx=2)
+
+        # Ações gerais
+        tk.Button(root, text="Limpar", command=self.clear,      width=8).grid(row=1, column=7, padx=4, pady=3)
+        tk.Button(root, text="Sair",   command=root.quit,       width=8).grid(row=1, column=8, padx=4, pady=3)
 
         self.points = []
         # store original lines so we can re-evaluate clipping when window changes
@@ -38,25 +60,17 @@ class PixelCanvas:
         self.define_clip = False
         self.clip_points = []
         self.clip_marker_ids = []
-        self.define_btn = tk.Button(root, text="Definir Janela", command=self.toggle_define_clip)
-        self.define_btn.grid(row=1, column=3)
 
-        # Clipping window is defined by two clicks; no manual entry UI
-        tk.Button(root, text="Reset Janela", command=self.reset_clip_window).grid(row=1, column=4)
+        # ── Linha 2: Transformações geométricas ───────────────────────────────
+        transf_frame = tk.LabelFrame(root, text="Transformações Geométricas", padx=4, pady=2)
+        transf_frame.grid(row=2, column=0, columnspan=9, padx=4, pady=3, sticky="w")
 
-        # Clipping algorithm selector
-        self.clip_algo = tk.StringVar(value="cohen")
-        tk.Radiobutton(root, text="Cohen-Sutherland", variable=self.clip_algo, value="cohen").grid(row=2, column=0, columnspan=2)
-        tk.Radiobutton(root, text="Liang-Barsky", variable=self.clip_algo, value="liang").grid(row=2, column=2, columnspan=2)
-
-        # Transformações geométricas 2D
-        tk.Label(root, text="Transformações:").grid(row=3, column=0)
-        tk.Button(root, text="Translação",  command=self.aplicar_translacao).grid(row=3, column=1)
-        tk.Button(root, text="Rotação",     command=self.aplicar_rotacao).grid(row=3, column=2)
-        tk.Button(root, text="Escala",      command=self.aplicar_escala).grid(row=3, column=3)
-        tk.Button(root, text="Reflexão X",  command=lambda: self.aplicar_reflexao('x')).grid(row=3, column=4)
-        tk.Button(root, text="Reflexão Y",  command=lambda: self.aplicar_reflexao('y')).grid(row=3, column=5)
-        tk.Button(root, text="Reflexão XY", command=lambda: self.aplicar_reflexao('xy')).grid(row=3, column=6)
+        tk.Button(transf_frame, text="Translação",  command=self.aplicar_translacao,              width=10).grid(row=0, column=0, padx=3)
+        tk.Button(transf_frame, text="Rotação",     command=self.aplicar_rotacao,                 width=10).grid(row=0, column=1, padx=3)
+        tk.Button(transf_frame, text="Escala",      command=self.aplicar_escala,                  width=10).grid(row=0, column=2, padx=3)
+        tk.Button(transf_frame, text="Reflexão X",  command=lambda: self.aplicar_reflexao('x'),  width=10).grid(row=0, column=3, padx=3)
+        tk.Button(transf_frame, text="Reflexão Y",  command=lambda: self.aplicar_reflexao('y'),  width=10).grid(row=0, column=4, padx=3)
+        tk.Button(transf_frame, text="Reflexão XY", command=lambda: self.aplicar_reflexao('xy'), width=10).grid(row=0, column=5, padx=3)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -256,7 +270,7 @@ class PixelCanvas:
                 self.clip_marker_ids = []
                 self.clip_points = []
                 self.define_clip = False
-                self.define_btn.config(text="Definir Janela")
+                self.define_btn.config(text="Definir")
             return
 
         mode = self.mode.get()
@@ -327,13 +341,13 @@ class PixelCanvas:
             for cid in self.clip_marker_ids:
                 self.canvas.delete(cid)
             self.clip_marker_ids = []
-            self.define_btn.config(text="Cancelar Definir")
+            self.define_btn.config(text="Cancelar")
         else:
             for cid in self.clip_marker_ids:
                 self.canvas.delete(cid)
             self.clip_marker_ids = []
             self.clip_points = []
-            self.define_btn.config(text="Definir Janela")
+            self.define_btn.config(text="Definir")
     
     def redraw_all_lines(self):
         # clear drawing (markers and previous lines), keep clip window redrawn at end
