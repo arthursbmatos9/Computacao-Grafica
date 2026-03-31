@@ -42,6 +42,11 @@ class PixelCanvas:
         # Clipping window is defined by two clicks; no manual entry UI
         tk.Button(root, text="Reset Janela", command=self.reset_clip_window).grid(row=1, column=4)
 
+        # Clipping algorithm selector
+        self.clip_algo = tk.StringVar(value="cohen")
+        tk.Radiobutton(root, text="Cohen-Sutherland", variable=self.clip_algo, value="cohen").grid(row=2, column=0, columnspan=2)
+        tk.Radiobutton(root, text="Liang-Barsky", variable=self.clip_algo, value="liang").grid(row=2, column=2, columnspan=2)
+
     def clear(self):
         self.canvas.delete("all")
         self.points = []
@@ -158,22 +163,36 @@ class PixelCanvas:
     def redraw_all_lines(self):
         # clear drawing (markers and previous lines), keep clip window redrawn at end
         self.canvas.delete("all")
-            # draw each original line by computing its pixel list once, then
-            # color pixels inside window black and outside lightgray. This preserves
-            # pixel positions independently of clipping-rounding differences.
+        # draw each original line by computing its pixel list once, then
+        # color pixels inside window black and outside lightgray.
         for (x1, y1, x2, y2, method) in self.lines:
             if method == 'dda':
                 pixels = dda_pixels(x1, y1, x2, y2)
             else:
                 pixels = bresenham_pixels(x1, y1, x2, y2)
 
-            for (px, py) in pixels:
-                if WINDOW_DEFINED:
-                    if obtemCodigo(px, py) == 0:
+            if WINDOW_DEFINED:
+                # get clipped segment using the selected algorithm
+                if self.clip_algo.get() == "cohen":
+                    clipped = cohen_sutherland(x1, y1, x2, y2)
+                else:
+                    clipped = liang_segment(x1, y1, x2, y2)
+
+                clipped_pixels = set()
+                if clipped:
+                    cx1, cy1, cx2, cy2 = clipped
+                    if method == 'dda':
+                        clipped_pixels = set(dda_pixels(cx1, cy1, cx2, cy2))
+                    else:
+                        clipped_pixels = set(bresenham_pixels(cx1, cy1, cx2, cy2))
+
+                for (px, py) in pixels:
+                    if (px, py) in clipped_pixels:
                         self.draw_pixel_color(px, py, "black")
                     else:
                         self.draw_pixel_color(px, py, "lightgray")
-                else:
+            else:
+                for (px, py) in pixels:
                     self.draw_pixel_color(px, py, "black")
 
         # draw circles stored
@@ -194,7 +213,6 @@ class PixelCanvas:
 
 def colore(x, y, canvas_obj):
     if 0 <= x < WIDTH_PIXELS and 0 <= y < HEIGHT_PIXELS:
-        # default color black
         try:
             canvas_obj.draw_pixel(x, y)
         except TypeError:
@@ -202,10 +220,6 @@ def colore(x, y, canvas_obj):
 
 def colore_color(x, y, canvas_obj, color):
     if 0 <= x < WIDTH_PIXELS and 0 <= y < HEIGHT_PIXELS:
-        # use draw_pixel_color if available
-        # if drawing the "outside" color (lightgray) and a window is defined,
-        # skip painting pixels that are inside the window so the clipped (black)
-        # drawing can overwrite them exactly without gaps caused by rounding.
         if color in ("lightgray", "gray", "silver") and WINDOW_DEFINED:
             if obtemCodigo(x, y) == 0:
                 return
@@ -243,6 +257,29 @@ def dda(xi, yi, xf, yf, canvas_obj, color="black"):
             colore(round(x), round(y), canvas_obj)
         else:
             colore_color(round(x), round(y), canvas_obj, color)
+
+def dda_pixels(xi, yi, xf, yf):
+    x = xi
+    y = yi
+    dx = xf - xi
+    dy = yf - yi
+    pixels = []
+
+    passos = max(abs(dx), abs(dy))
+    pixels.append((round(x), round(y)))
+
+    if passos == 0:
+        return pixels
+
+    Xincr = dx/passos
+    Yincr = dy/passos
+
+    for i in range(passos):
+        x += Xincr
+        y += Yincr
+        pixels.append((round(x), round(y)))
+
+    return pixels
 
 def bresenham_reta(xi, yi, xf, yf, canvas_obj, color="black"):
     x = xi
@@ -316,29 +353,6 @@ def bresenham_circunferencia(xc, yc, r, canvas_obj, color="black"):
             simetricos(x, y, xc, yc, canvas_obj)
         else:
             simetricos_color(x, y, xc, yc, canvas_obj, color)
-
-def dda_pixels(xi, yi, xf, yf):
-    x = xi
-    y = yi
-    dx = xf - xi
-    dy = yf - yi
-    pixels = []
-
-    passos = max(abs(dx), abs(dy))
-    pixels.append((round(x), round(y)))
-
-    if passos == 0:
-        return pixels
-
-    Xincr = dx/passos
-    Yincr = dy/passos
-
-    for i in range(passos):
-        x += Xincr
-        y += Yincr
-        pixels.append((round(x), round(y)))
-
-    return pixels
 
 def bresenham_pixels(xi, yi, xf, yf):
     x = xi
@@ -536,6 +550,60 @@ def cohen_sutherland_draw(Xa, Ya, Xb, Yb, canvas_obj):
     if clipped:
         xa, ya, xb, yb = clipped
         desenha(xa, ya, xb, yb, canvas_obj)
+
+
+def cliptTest(p, q, u1, u2):
+    result = True
+    if p < 0:
+        r = q / p
+        if r > u2:
+            result = False
+        elif r > u1:
+            u1 = r
+    elif p > 0:
+        r = q / p
+        if r < u1:
+            result = False
+        elif r < u2:
+            u2 = r
+    elif q < 0:
+        result = False
+
+    return result, u1, u2  # ← return updated u1, u2
+
+def liang_segment(x1, y1, x2, y2):
+    """Return clipped segment (x1,y1,x2,y2) inside window, or None if rejected."""
+    if not WINDOW_DEFINED:
+        return (x1, y1, x2, y2)
+
+    u1 = 0.0
+    u2 = 1.0
+    dx = x2 - x1
+    dy = y2 - y1
+
+    result, u1, u2 = cliptTest(-dx, x1 - Xmin, u1, u2)
+    if result:
+        result, u1, u2 = cliptTest(dx, Xmax - x1, u1, u2)
+        if result:
+            result, u1, u2 = cliptTest(-dy, y1 - Ymin, u1, u2)
+            if result:
+                result, u1, u2 = cliptTest(dy, Ymax - y1, u1, u2)
+                if result:
+                    if u2 < 1:
+                        x2 = x1 + u2 * dx
+                        y2 = y1 + u2 * dy
+                    if u1 > 0:
+                        x1 = x1 + u1 * dx
+                        y1 = y1 + u1 * dy
+                    return (round(x1), round(y1), round(x2), round(y2))
+    return None
+
+def liang(x1, y1, x2, y2, canvas_obj):
+    """Draw segment clipped by Liang-Barsky."""
+    clipped = liang_segment(x1, y1, x2, y2)
+    if clipped:
+        cx1, cy1, cx2, cy2 = clipped
+        desenha(cx1, cy1, cx2, cy2, canvas_obj)
 
 def main():
     root = tk.Tk()
