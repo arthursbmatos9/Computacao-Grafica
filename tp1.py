@@ -364,7 +364,7 @@ class PixelCanvas:
                         clipped_pixels = set(bresenham_pixels(cx1, cy1, cx2, cy2))
 
                 for (px, py) in pixels:
-                    if (px, py) in clipped_pixels:
+                    if obtemCodigo(px, py) == 0:
                         self.draw_pixel_color(px, py, cor_dentro)
                     else:
                         self.draw_pixel_color(px, py, "lightgray")
