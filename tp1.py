@@ -23,6 +23,7 @@ class PixelCanvas:
         tk.Radiobutton(root, text="DDA", variable=self.mode, value="dda").grid(row=1, column=0)
         tk.Radiobutton(root, text="Bresenham Reta", variable=self.mode, value="bresenham_reta").grid(row=1, column=1)
         tk.Radiobutton(root, text="Bresenham Círculo", variable=self.mode, value="bresenham_circ").grid(row=1, column=2)
+        tk.Radiobutton(root, text="Selecionar", variable=self.mode, value="selecionar").grid(row=2, column=4, columnspan=2)
 
         tk.Button(root, text="Limpar", command=self.clear).grid(row=1, column=5)
         tk.Button(root, text="Sair", command=root.quit).grid(row=1, column=6)
@@ -31,6 +32,7 @@ class PixelCanvas:
         # store original lines so we can re-evaluate clipping when window changes
         self.lines = []  # each item: (x1,y1,x2,y2,method) method in {'dda','bresenham_reta'}
         self.circles = []  # each item: (xc, yc, r)
+        self.selected = None  # ('line', idx) or ('circle', idx) or None
 
         # click-to-define clipping window state
         self.define_clip = False
@@ -46,6 +48,174 @@ class PixelCanvas:
         self.clip_algo = tk.StringVar(value="cohen")
         tk.Radiobutton(root, text="Cohen-Sutherland", variable=self.clip_algo, value="cohen").grid(row=2, column=0, columnspan=2)
         tk.Radiobutton(root, text="Liang-Barsky", variable=self.clip_algo, value="liang").grid(row=2, column=2, columnspan=2)
+
+        # Transformações geométricas 2D
+        tk.Label(root, text="Transformações:").grid(row=3, column=0)
+        tk.Button(root, text="Translação",  command=self.aplicar_translacao).grid(row=3, column=1)
+        tk.Button(root, text="Rotação",     command=self.aplicar_rotacao).grid(row=3, column=2)
+        tk.Button(root, text="Escala",      command=self.aplicar_escala).grid(row=3, column=3)
+        tk.Button(root, text="Reflexão X",  command=lambda: self.aplicar_reflexao('x')).grid(row=3, column=4)
+        tk.Button(root, text="Reflexão Y",  command=lambda: self.aplicar_reflexao('y')).grid(row=3, column=5)
+        tk.Button(root, text="Reflexão XY", command=lambda: self.aplicar_reflexao('xy')).grid(row=3, column=6)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def ask_float(self, titulo, prompt):
+        """Pede um número ao usuário aceitando vírgula ou ponto decimal."""
+        raw = simpledialog.askstring(titulo, prompt, parent=self.root)
+        if raw is None:
+            return None
+        raw = raw.strip().replace(',', '.')
+        try:
+            return float(raw)
+        except ValueError:
+            messagebox.showerror("Erro", f"Valor inválido: '{raw}'", parent=self.root)
+            return None
+
+    # ------------------------------------------------------------------
+    # Transformações geométricas 2D
+    # ------------------------------------------------------------------
+
+    def _check_selected(self):
+        if self.selected is None:
+            messagebox.showwarning("Seleção",
+                "Nenhum objeto selecionado.\nUse o modo Selecionar e clique num objeto.",
+                parent=self.root)
+            return False
+        return True
+
+    def selecionar_objeto(self, px, py):
+        LIMIAR = 5
+        melhor_idx = None
+        melhor_tipo = None
+        melhor_dist = float('inf')
+
+        for i, (x1, y1, x2, y2, _m) in enumerate(self.lines):
+            d = dist_ponto_segmento(px, py, x1, y1, x2, y2)
+            if d < melhor_dist:
+                melhor_dist = d
+                melhor_idx = i
+                melhor_tipo = 'line'
+
+        for i, (xc, yc, r) in enumerate(self.circles):
+            d = abs(math.hypot(px - xc, py - yc) - r)
+            if d < melhor_dist:
+                melhor_dist = d
+                melhor_idx = i
+                melhor_tipo = 'circle'
+
+        if melhor_dist <= LIMIAR:
+            self.selected = (melhor_tipo, melhor_idx)
+        else:
+            self.selected = None
+
+        self.redraw_all_lines()
+
+    def _centroide(self):
+        """Retorna o centroide (cx, cy) do objeto selecionado."""
+        tipo, idx = self.selected
+        if tipo == 'line':
+            x1, y1, x2, y2, _m = self.lines[idx]
+            return ((x1 + x2) / 2, (y1 + y2) / 2)
+        else:
+            xc, yc, _r = self.circles[idx]
+            return (float(xc), float(yc))
+
+    def aplicar_translacao(self):
+        if not self._check_selected(): return
+        tx = self.ask_float("Translação", "Deslocamento em X (tx):")
+        if tx is None: return
+        ty = self.ask_float("Translação", "Deslocamento em Y (ty):")
+        if ty is None: return
+
+        # translação não depende de pivô — soma direta
+        tipo, idx = self.selected
+        if tipo == 'line':
+            x1, y1, x2, y2, m = self.lines[idx]
+            self.lines[idx] = (round(x1+tx), round(y1+ty), round(x2+tx), round(y2+ty), m)
+        else:
+            xc, yc, r = self.circles[idx]
+            self.circles[idx] = (round(xc+tx), round(yc+ty), r)
+        self.redraw_all_lines()
+
+    def aplicar_rotacao(self):
+        if not self._check_selected(): return
+        ang = self.ask_float("Rotação", "Ângulo de rotação em graus (ex: 34,67):")
+        if ang is None: return
+        rad = math.radians(ang)
+        cos_a = math.cos(rad)
+        sin_a = math.sin(rad)
+        cx, cy = self._centroide()
+
+        def rot(x, y):
+            # translada para origem do centroide, rota, volta
+            dx = x - cx
+            dy = y - cy
+            return (round(cx + dx * cos_a - dy * sin_a),
+                    round(cy + dx * sin_a + dy * cos_a))
+
+        tipo, idx = self.selected
+        if tipo == 'line':
+            x1, y1, x2, y2, m = self.lines[idx]
+            self.lines[idx] = (*rot(x1, y1), *rot(x2, y2), m)
+        else:
+            xc, yc, r = self.circles[idx]
+            # círculo: só o centro rota em torno de si mesmo → permanece no lugar
+            # (rotação de círculo em torno do próprio centro não move nada visualmente)
+            self.circles[idx] = (round(cx), round(cy), r)
+        self.redraw_all_lines()
+
+    def aplicar_escala(self):
+        if not self._check_selected(): return
+        sx = self.ask_float("Escala", "Fator de escala em X (sx):")
+        if sx is None: return
+        sy = self.ask_float("Escala", "Fator de escala em Y (sy):")
+        if sy is None: return
+        cx, cy = self._centroide()
+
+        def scale(x, y):
+            # translada para origem do centroide, escala, volta
+            dx = x - cx
+            dy = y - cy
+            return (round(cx + dx * sx), round(cy + dy * sy))
+
+        tipo, idx = self.selected
+        if tipo == 'line':
+            x1, y1, x2, y2, m = self.lines[idx]
+            self.lines[idx] = (*scale(x1, y1), *scale(x2, y2), m)
+        else:
+            xc, yc, r = self.circles[idx]
+            self.circles[idx] = (round(xc), round(yc), round(r * max(abs(sx), abs(sy))))
+        self.redraw_all_lines()
+
+    def aplicar_reflexao(self, eixo):
+        if not self._check_selected(): return
+
+        # ⚠️ CENTRO DO GRID (CORRETO)
+        cx = WIDTH_PIXELS / 2
+        cy = HEIGHT_PIXELS / 2
+
+        mx = -1 if eixo in ('y', 'xy') else 1
+        my = -1 if eixo in ('x', 'xy') else 1
+
+        def reflect(x, y):
+            dx = x - cx
+            dy = y - cy
+            return (round(cx + dx * mx), round(cy + dy * my))
+
+        tipo, idx = self.selected
+
+        if tipo == 'line':
+            x1, y1, x2, y2, m = self.lines[idx]
+            self.lines[idx] = (*reflect(x1, y1), *reflect(x2, y2), m)
+        else:
+            xc, yc, r = self.circles[idx]
+            rx, ry = reflect(xc, yc)
+            self.circles[idx] = (rx, ry, r)
+
+        self.redraw_all_lines()
 
     def clear(self):
         self.canvas.delete("all")
@@ -90,6 +260,11 @@ class PixelCanvas:
             return
 
         mode = self.mode.get()
+
+        if mode == "selecionar":
+            self.selecionar_objeto(px, py)
+            return
+
         if mode in ("dda", "bresenham_reta"):
             self.points.append((px, py))
             # show a small marker while selecting
@@ -165,7 +340,9 @@ class PixelCanvas:
         self.canvas.delete("all")
         # draw each original line by computing its pixel list once, then
         # color pixels inside window black and outside lightgray.
-        for (x1, y1, x2, y2, method) in self.lines:
+        for i, (x1, y1, x2, y2, method) in enumerate(self.lines):
+            cor_dentro = "blue" if self.selected == ('line', i) else "black"
+
             if method == 'dda':
                 pixels = dda_pixels(x1, y1, x2, y2)
             else:
@@ -188,24 +365,26 @@ class PixelCanvas:
 
                 for (px, py) in pixels:
                     if (px, py) in clipped_pixels:
-                        self.draw_pixel_color(px, py, "black")
+                        self.draw_pixel_color(px, py, cor_dentro)
                     else:
                         self.draw_pixel_color(px, py, "lightgray")
             else:
                 for (px, py) in pixels:
-                    self.draw_pixel_color(px, py, "black")
+                    self.draw_pixel_color(px, py, cor_dentro)
 
         # draw circles stored
-        for (xc, yc, r) in self.circles:
+        for i, (xc, yc, r) in enumerate(self.circles):
+            cor_dentro = "blue" if self.selected == ('circle', i) else "black"
+
             pixels = bresenham_circ_pixels(xc, yc, r)
             for (px, py) in pixels:
                 if WINDOW_DEFINED:
                     if obtemCodigo(px, py) == 0:
-                        self.draw_pixel_color(px, py, "black")
+                        self.draw_pixel_color(px, py, cor_dentro)
                     else:
                         self.draw_pixel_color(px, py, "lightgray")
                 else:
-                    self.draw_pixel_color(px, py, "black")
+                    self.draw_pixel_color(px, py, cor_dentro)
 
         # redraw clip window on top
         self.draw_clip_window()
@@ -604,6 +783,15 @@ def liang(x1, y1, x2, y2, canvas_obj):
     if clipped:
         cx1, cy1, cx2, cy2 = clipped
         desenha(cx1, cy1, cx2, cy2, canvas_obj)
+
+def dist_ponto_segmento(px, py, x1, y1, x2, y2):
+    dx = x2 - x1
+    dy = y2 - y1
+    if dx == 0 and dy == 0:
+        return math.hypot(px - x1, py - y1)
+    t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
+    t = max(0.0, min(1.0, t))
+    return math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
 
 def main():
     root = tk.Tk()
