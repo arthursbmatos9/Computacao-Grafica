@@ -3,8 +3,7 @@ from tkinter import simpledialog, messagebox
 import math
 
 
-## INTERFACE ## 
-
+# Interface gráfica e constantes do canvas
 PIXEL_SIZE = 5
 WIDTH_PIXELS = 256
 HEIGHT_PIXELS = 150
@@ -20,8 +19,8 @@ class PixelCanvas:
         self.canvas.grid(row=0, column=0, columnspan=10, sticky="ew")
         self.canvas.bind("<Button-1>", self.on_click)
 
-        # ── Linha 1: Algoritmos de rasterização | Janela | Ações ──────────────
-        # Grupo: Desenho
+        # UI: controles de desenho e clipping
+        # Grupo: desenho
         draw_frame = tk.LabelFrame(root, text="Desenho", padx=4, pady=2)
         draw_frame.grid(row=1, column=0, columnspan=3, padx=4, pady=3, sticky="w")
 
@@ -30,7 +29,7 @@ class PixelCanvas:
         tk.Radiobutton(draw_frame, text="Bresenham Círculo", variable=self.mode, value="bresenham_circ").grid(row=0, column=2, padx=2)
         tk.Radiobutton(draw_frame, text="Selecionar",        variable=self.mode, value="selecionar").grid(row=0, column=3, padx=6)
 
-        # Grupo: Clipping — janela
+        # Grupo: janela de clipping
         clip_win_frame = tk.LabelFrame(root, text="Janela de Clipping", padx=4, pady=2)
         clip_win_frame.grid(row=1, column=3, columnspan=2, padx=4, pady=3, sticky="w")
 
@@ -38,7 +37,7 @@ class PixelCanvas:
         self.define_btn.grid(row=0, column=0, padx=2)
         tk.Button(clip_win_frame, text="Reset", command=self.reset_clip_window, width=7).grid(row=0, column=1, padx=2)
 
-        # Grupo: Clipping — algoritmo
+        # Grupo: algoritmos de clipping
         clip_algo_frame = tk.LabelFrame(root, text="Algoritmo de Clipping", padx=4, pady=2)
         clip_algo_frame.grid(row=1, column=5, columnspan=3, padx=4, pady=3, sticky="w")
 
@@ -46,22 +45,22 @@ class PixelCanvas:
         tk.Radiobutton(clip_algo_frame, text="C. Sutherland", variable=self.clip_algo, value="cohen").grid(row=0, column=0, padx=2)
         tk.Radiobutton(clip_algo_frame, text="L. Barsky",     variable=self.clip_algo, value="liang").grid(row=0, column=1, padx=2)
 
-        # Ações gerais
+        # Ações principais
         tk.Button(root, text="Limpar", command=self.clear,      width=8).grid(row=1, column=7, padx=4, pady=3)
         tk.Button(root, text="Sair",   command=root.quit,       width=8).grid(row=1, column=8, padx=4, pady=3)
 
         self.points = []
-        # store original lines so we can re-evaluate clipping when window changes
-        self.lines = []  # each item: (x1,y1,x2,y2,method) method in {'dda','bresenham_reta'}
-        self.circles = []  # each item: (xc, yc, r)
-        self.selected = None  # ('line', idx) or ('circle', idx) or None
+        # Linhas originais (para recalcular clipping)
+        self.lines = []  # item: (x1,y1,x2,y2,method) method in {'dda','bresenham_reta'}
+        self.circles = []  # item: (xc, yc, r)
+        self.selected = None  # ('line', idx) | ('circle', idx) | None
 
-        # click-to-define clipping window state
+        # Estado: definir janela por cliques
         self.define_clip = False
         self.clip_points = []
         self.clip_marker_ids = []
 
-        # ── Linha 2: Transformações geométricas ───────────────────────────────
+        # Transformações geométricas
         transf_frame = tk.LabelFrame(root, text="Transformações Geométricas", padx=4, pady=2)
         transf_frame.grid(row=2, column=0, columnspan=9, padx=4, pady=3, sticky="w")
 
@@ -72,9 +71,7 @@ class PixelCanvas:
         tk.Button(transf_frame, text="Reflexão Y",  command=lambda: self.aplicar_reflexao('y'),  width=10).grid(row=0, column=4, padx=3)
         tk.Button(transf_frame, text="Reflexão XY", command=lambda: self.aplicar_reflexao('xy'), width=10).grid(row=0, column=5, padx=3)
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
+    # Utilitários
 
     def ask_float(self, titulo, prompt):
         """Pede um número ao usuário aceitando vírgula ou ponto decimal."""
@@ -88,10 +85,9 @@ class PixelCanvas:
             messagebox.showerror("Erro", f"Valor inválido: '{raw}'", parent=self.root)
             return None
 
-    # ------------------------------------------------------------------
     # Transformações geométricas 2D
-    # ------------------------------------------------------------------
 
+    # Verifica se há um objeto selecionado
     def _check_selected(self):
         if self.selected is None:
             messagebox.showwarning("Seleção",
@@ -100,6 +96,7 @@ class PixelCanvas:
             return False
         return True
 
+    # Seleciona o objeto (reta ou círculo)
     def selecionar_objeto(self, px, py):
         LIMIAR = 5
         melhor_idx = None
@@ -144,7 +141,7 @@ class PixelCanvas:
         ty = self.ask_float("Translação", "Deslocamento em Y (ty):")
         if ty is None: return
 
-        # translação não depende de pivô — soma direta
+        # Translação: soma direta aos pontos do objeto
         tipo, idx = self.selected
         if tipo == 'line':
             x1, y1, x2, y2, m = self.lines[idx]
@@ -164,7 +161,7 @@ class PixelCanvas:
         cx, cy = self._centroide()
 
         def rot(x, y):
-            # translada para origem do centroide, rota, volta
+            # Rotaciona em torno do centroide
             dx = x - cx
             dy = y - cy
             return (round(cx + dx * cos_a - dy * sin_a),
@@ -190,7 +187,7 @@ class PixelCanvas:
         cx, cy = self._centroide()
 
         def scale(x, y):
-            # translada para origem do centroide, escala, volta
+            # Escala em relação ao centroide
             dx = x - cx
             dy = y - cy
             return (round(cx + dx * sx), round(cy + dy * sy))
@@ -206,8 +203,7 @@ class PixelCanvas:
 
     def aplicar_reflexao(self, eixo):
         if not self._check_selected(): return
-
-        # ⚠️ CENTRO DO GRID (CORRETO)
+        # Centro do grid (origem para reflexão)
         cx = WIDTH_PIXELS / 2
         cy = HEIGHT_PIXELS / 2
 
@@ -215,6 +211,7 @@ class PixelCanvas:
         my = -1 if eixo in ('x', 'xy') else 1
 
         def reflect(x, y):
+            # Reflete ponto em relação ao centro do grid
             dx = x - cx
             dy = y - cy
             return (round(cx + dx * mx), round(cy + dy * my))
@@ -232,6 +229,7 @@ class PixelCanvas:
         self.redraw_all_lines()
 
     def clear(self):
+        # Limpa canvas e estruturas de dados
         self.canvas.delete("all")
         self.points = []
         self.lines = []
@@ -243,10 +241,9 @@ class PixelCanvas:
         py = int(event.y / PIXEL_SIZE)
         if px < 0 or py < 0 or px >= WIDTH_PIXELS or py >= HEIGHT_PIXELS:
             return
-        # If user is defining clipping window by clicks
+        # Converte clique em coordenadas de pixel e trata interações
         if self.define_clip:
             self.clip_points.append((px, py))
-            # draw temporary marker
             x1 = px * PIXEL_SIZE
             y1 = py * PIXEL_SIZE
             x2 = x1 + PIXEL_SIZE
@@ -259,12 +256,12 @@ class PixelCanvas:
                 ymin = min(y1p, y2p)
                 xmax = max(x1p, x2p)
                 ymax = max(y1p, y2p)
-                # apply and draw window directly (no manual entries)
+                # Define janela de clipping com os dois pontos
                 global Xmin, Ymin, Xmax, Ymax, WINDOW_DEFINED
                 Xmin, Ymin, Xmax, Ymax = xmin, ymin, xmax, ymax
                 WINDOW_DEFINED = True
                 self.redraw_all_lines()
-                # cleanup
+                # Limpa marcadores temporários
                 for cid in self.clip_marker_ids:
                     self.canvas.delete(cid)
                 self.clip_marker_ids = []
@@ -281,11 +278,11 @@ class PixelCanvas:
 
         if mode in ("dda", "bresenham_reta"):
             self.points.append((px, py))
-            # show a small marker while selecting
+            # Marcador visual durante seleção
             self.draw_pixel(px, py)
             if len(self.points) == 2:
                 (x1, y1), (x2, y2) = self.points
-                # store the original line and redraw all lines with current clipping
+                # Armazena a linha original e redesenha considerando clipping
                 self.lines.append((x1, y1, x2, y2, mode))
                 self.points = []
                 self.redraw_all_lines()
@@ -293,11 +290,12 @@ class PixelCanvas:
             r = simpledialog.askinteger("Raio", "Digite o raio (em pixels):", parent=self.root, minvalue=1, maxvalue=1000)
             if r is None:
                 return
-            # store circle and redraw with clipping (circles handled like lines)
+            # Armazena círculo e redesenha (tratado como linha para clipping)
             self.circles.append((px, py, r))
             self.redraw_all_lines()
 
     def draw_pixel(self, x, y):
+        # Desenha um pixel escalado por PIXEL_SIZE
         color = "black"
         x1 = x * PIXEL_SIZE
         y1 = y * PIXEL_SIZE
@@ -306,16 +304,17 @@ class PixelCanvas:
         self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline=color)
 
     def draw_pixel_color(self, x, y, color):
+        # Desenha pixel com cor específica
         x1 = x * PIXEL_SIZE
         y1 = y * PIXEL_SIZE
         x2 = x1 + PIXEL_SIZE
         y2 = y1 + PIXEL_SIZE
         self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline=color)
 
-    # Window is applied via two-click 'Definir Janela'; no manual apply method
+    # Janela definida por dois cliques no canvas
 
     def draw_clip_window(self):
-        # remove previous visual rectangle
+        # Remove retângulo anterior e desenha janela de clipping, se houver
         self.canvas.delete("clip_window")
         if not WINDOW_DEFINED:
             return
@@ -328,13 +327,13 @@ class PixelCanvas:
     def reset_clip_window(self):
         global Xmin, Ymin, Xmax, Ymax
         Xmin, Ymin, Xmax, Ymax = 0, 0, WIDTH_PIXELS - 1, HEIGHT_PIXELS - 1
-        # no manual UI values to update
-        # unset window defined and redraw (no clipping)
+        # Restaura janela para todo o canvas (desativa clipping)
         global WINDOW_DEFINED
         WINDOW_DEFINED = False
         self.redraw_all_lines()
 
     def toggle_define_clip(self):
+        # Alterna modo de definição da janela por clique
         self.define_clip = not self.define_clip
         if self.define_clip:
             self.clip_points = []
@@ -350,10 +349,9 @@ class PixelCanvas:
             self.define_btn.config(text="Definir")
     
     def redraw_all_lines(self):
-        # clear drawing (markers and previous lines), keep clip window redrawn at end
+        # Redesenha todas as primitivas aplicando clipping e seleção
         self.canvas.delete("all")
-        # draw each original line by computing its pixel list once, then
-        # color pixels inside window black and outside lightgray.
+        # Para cada linha, calcula pixels e aplica política de cor
         for i, (x1, y1, x2, y2, method) in enumerate(self.lines):
             cor_dentro = "blue" if self.selected == ('line', i) else "black"
 
@@ -363,7 +361,7 @@ class PixelCanvas:
                 pixels = bresenham_pixels(x1, y1, x2, y2)
 
             if WINDOW_DEFINED:
-                # get clipped segment using the selected algorithm
+                # Obtem segmento recortado pelo algoritmo selecionado
                 if self.clip_algo.get() == "cohen":
                     clipped = cohen_sutherland(x1, y1, x2, y2)
                 else:
@@ -386,7 +384,7 @@ class PixelCanvas:
                 for (px, py) in pixels:
                     self.draw_pixel_color(px, py, cor_dentro)
 
-        # draw circles stored
+        # Desenha círculos armazenados
         for i, (xc, yc, r) in enumerate(self.circles):
             cor_dentro = "blue" if self.selected == ('circle', i) else "black"
 
@@ -400,7 +398,7 @@ class PixelCanvas:
                 else:
                     self.draw_pixel_color(px, py, cor_dentro)
 
-        # redraw clip window on top
+        # Redesenha janela de clipping sobre as primitivas
         self.draw_clip_window()
 
 
@@ -410,6 +408,7 @@ def colore(x, y, canvas_obj):
             canvas_obj.draw_pixel(x, y)
         except TypeError:
             canvas_obj.draw_pixel(x, y)
+    # Desenha pixel sem cor explícita (wrapper)
 
 def colore_color(x, y, canvas_obj, color):
     if 0 <= x < WIDTH_PIXELS and 0 <= y < HEIGHT_PIXELS:
@@ -423,9 +422,10 @@ def colore_color(x, y, canvas_obj, color):
             canvas_obj.draw_pixel(x, y)
 
 
-### ALGORITMOS ###
+# Algoritmos de rasterização
 
 def dda(xi, yi, xf, yf, canvas_obj, color="black"):
+    # DDA: desenha reta usando incremento uniforme
     x = xi
     y = yi
     dx = xf - xi
@@ -452,6 +452,7 @@ def dda(xi, yi, xf, yf, canvas_obj, color="black"):
             colore_color(round(x), round(y), canvas_obj, color)
 
 def dda_pixels(xi, yi, xf, yf):
+    # DDA: retorna lista de pixels da reta
     x = xi
     y = yi
     dx = xf - xi
@@ -475,6 +476,7 @@ def dda_pixels(xi, yi, xf, yf):
     return pixels
 
 def bresenham_reta(xi, yi, xf, yf, canvas_obj, color="black"):
+    # Bresenham (reta): desenha reta com decisões inteiras
     x = xi
     y = yi
 
@@ -528,6 +530,7 @@ def bresenham_reta(xi, yi, xf, yf, canvas_obj, color="black"):
                 colore_color(x, y, canvas_obj, color)
 
 def bresenham_circunferencia(xc, yc, r, canvas_obj, color="black"):
+    # Bresenham (circunferência): desenha círculos por simetria
     x = 0
     y = r
     p = 3 - 2 * r
@@ -548,6 +551,7 @@ def bresenham_circunferencia(xc, yc, r, canvas_obj, color="black"):
             simetricos_color(x, y, xc, yc, canvas_obj, color)
 
 def bresenham_pixels(xi, yi, xf, yf):
+    # Bresenham: retorna lista de pixels para segmento
     x = xi
     y = yi
     pixels = [(x, y)]
@@ -593,6 +597,7 @@ def bresenham_pixels(xi, yi, xf, yf):
     return pixels
 
 def bresenham_circ_pixels(xc, yc, r):
+    # Bresenham: pixels para circunferência (conjunto de pontos)
     x = 0
     y = r
     p = 3 - 2 * r
@@ -622,6 +627,7 @@ def bresenham_circ_pixels(xc, yc, r):
     return sorted(pts)
 
 def simetricos(a, b, xc, yc, canvas_obj):
+    # Plota as 8 simetrias do ponto para circunferência
     colore(a + xc, b + yc, canvas_obj)
     colore(-a + xc, b + yc, canvas_obj)
     colore(a + xc, -b + yc, canvas_obj)
@@ -632,6 +638,7 @@ def simetricos(a, b, xc, yc, canvas_obj):
     colore(-b + xc, -a + yc, canvas_obj)
 
 def simetricos_color(a, b, xc, yc, canvas_obj, color):
+    # Versão colorida dos pontos simétricos
     colore_color(a + xc, b + yc, canvas_obj, color)
     colore_color(-a + xc, b + yc, canvas_obj, color)
     colore_color(a + xc, -b + yc, canvas_obj, color)
@@ -641,16 +648,16 @@ def simetricos_color(a, b, xc, yc, canvas_obj, color):
     colore_color(b + xc, -a + yc, canvas_obj, color)
     colore_color(-b + xc, -a + yc, canvas_obj, color)
 
-# Clipping window (defaults to full canvas)
+# Janela de clipping (padrão: todo o canvas)
 Xmin = 0
 Ymin = 0
 Xmax = WIDTH_PIXELS - 1
 Ymax = HEIGHT_PIXELS - 1
-# whether a clipping window is currently defined by the user
+# Flag: janela definida pelo usuário
 WINDOW_DEFINED = False
 
 def obtemCodigo(x, y):
-    # if no window defined, consider point inside
+    # Retorna código de região (Cohen-Sutherland). 0 => dentro
     if not WINDOW_DEFINED:
         return 0
     code = 0
@@ -665,14 +672,16 @@ def obtemCodigo(x, y):
     return code
 
 def verificaBit(code, pos):
+    # Testa bit do código na posição pos
     return 1 if (code & (1 << pos)) != 0 else 0
 
 def desenha(xa, ya, xb, yb, canvas_obj):
+    # Wrapper que desenha reta com Bresenham
     bresenham_reta(xa, ya, xb, yb, canvas_obj)
 
 def cohen_sutherland(Xa, Ya, Xb, Yb):
     """Return clipped segment (xa,ya,xb,yb) inside window, or None if rejected."""
-    # if no window defined, return the original segment
+    # Se sem janela, retorna segmento original
     if not WINDOW_DEFINED:
         return (Xa, Ya, Xb, Yb)
 
@@ -739,6 +748,7 @@ def cohen_sutherland(Xa, Ya, Xb, Yb):
     return None
 
 def cohen_sutherland_draw(Xa, Ya, Xb, Yb, canvas_obj):
+    # Desenha segmento recortado usando Cohen-Sutherland
     clipped = cohen_sutherland(Xa, Ya, Xb, Yb)
     if clipped:
         xa, ya, xb, yb = clipped
@@ -746,6 +756,7 @@ def cohen_sutherland_draw(Xa, Ya, Xb, Yb, canvas_obj):
 
 
 def cliptTest(p, q, u1, u2):
+    # Auxiliar Liang-Barsky: atualiza u1,u2 conforme p,q
     result = True
     if p < 0:
         r = q / p
@@ -762,7 +773,7 @@ def cliptTest(p, q, u1, u2):
     elif q < 0:
         result = False
 
-    return result, u1, u2  # ← return updated u1, u2
+    return result, u1, u2
 
 def liang_segment(x1, y1, x2, y2):
     """Return clipped segment (x1,y1,x2,y2) inside window, or None if rejected."""
