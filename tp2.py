@@ -18,6 +18,7 @@ class PixelCanvas:
         self.canvas = tk.Canvas(root, width=CANVAS_WIDTH, height=CANVAS_HEIGHT, bg="white")
         self.canvas.grid(row=0, column=0, columnspan=10, sticky="ew")
         self.canvas.bind("<Button-1>", self.on_click)
+        self.canvas.bind("<Button-3>", self.on_right_click)
 
         # UI: controles de desenho e clipping
         # Grupo: desenho
@@ -27,8 +28,9 @@ class PixelCanvas:
         tk.Radiobutton(draw_frame, text="DDA",               variable=self.mode, value="dda").grid(row=0, column=0, padx=2)
         tk.Radiobutton(draw_frame, text="Bresenham Reta",    variable=self.mode, value="bresenham_reta").grid(row=0, column=1, padx=2)
         tk.Radiobutton(draw_frame, text="Bresenham Círculo", variable=self.mode, value="bresenham_circ").grid(row=0, column=2, padx=2)
-        tk.Radiobutton(draw_frame, text="Bezier",            variable=self.mode, value="bezier").grid(row=0, column=3, padx=2)
-        tk.Radiobutton(draw_frame, text="Selecionar",        variable=self.mode, value="selecionar").grid(row=0, column=4, padx=6)
+        tk.Radiobutton(draw_frame, text="Bézier",            variable=self.mode, value="bezier").grid(row=0, column=3, padx=2)
+        tk.Radiobutton(draw_frame, text="B-spline",          variable=self.mode, value="bspline").grid(row=0, column=4, padx=2)
+        tk.Radiobutton(draw_frame, text="Selecionar",        variable=self.mode, value="selecionar").grid(row=0, column=5, padx=6)
 
         # Grupo: janela de clipping
         clip_win_frame = tk.LabelFrame(root, text="Janela de Clipping", padx=4, pady=2)
@@ -55,7 +57,9 @@ class PixelCanvas:
         self.lines = []  # item: (x1,y1,x2,y2,method) method in {'dda','bresenham_reta'}
         self.circles = []  # item: (xc, yc, r)
         self.beziers = []  # item: (p0, p1, p2, p3) pontos de controle da cúbica
-        self.selected = None  # ('line', idx) | ('circle', idx) | ('bezier', idx) | None
+        self.bsplines = []  # item: (p0, p1, ..., pn) pontos de controle, n >= 3
+        self.bspline_temp = []  # pontos da B-spline sendo coletados (clique direito finaliza)
+        self.selected = None  # ('line', idx) | ('circle', idx) | ('bezier', idx) | ('bspline', idx) | None
 
         # Estado: definir janela por cliques
         self.define_clip = False
@@ -126,6 +130,13 @@ class PixelCanvas:
                 melhor_idx = i
                 melhor_tipo = 'bezier'
 
+        for i, pontos in enumerate(self.bsplines):
+            d = dist_ponto_bspline(px, py, pontos)
+            if d < melhor_dist:
+                melhor_dist = d
+                melhor_idx = i
+                melhor_tipo = 'bspline'
+
         if melhor_dist <= LIMIAR:
             self.selected = (melhor_tipo, melhor_idx)
         else:
@@ -141,6 +152,11 @@ class PixelCanvas:
             return ((x1 + x2) / 2, (y1 + y2) / 2)
         elif tipo == 'bezier':
             pontos = self.beziers[idx]
+            cx = sum(p[0] for p in pontos) / len(pontos)
+            cy = sum(p[1] for p in pontos) / len(pontos)
+            return (cx, cy)
+        elif tipo == 'bspline':
+            pontos = self.bsplines[idx]
             cx = sum(p[0] for p in pontos) / len(pontos)
             cy = sum(p[1] for p in pontos) / len(pontos)
             return (cx, cy)
@@ -163,6 +179,9 @@ class PixelCanvas:
         elif tipo == 'bezier':
             pontos = self.beziers[idx]
             self.beziers[idx] = tuple((round(x+tx), round(y+ty)) for (x, y) in pontos)
+        elif tipo == 'bspline':
+            pontos = self.bsplines[idx]
+            self.bsplines[idx] = tuple((round(x+tx), round(y+ty)) for (x, y) in pontos)
         else:
             xc, yc, r = self.circles[idx]
             self.circles[idx] = (round(xc+tx), round(yc+ty), r)
@@ -191,6 +210,9 @@ class PixelCanvas:
         elif tipo == 'bezier':
             pontos = self.beziers[idx]
             self.beziers[idx] = tuple(rot(x, y) for (x, y) in pontos)
+        elif tipo == 'bspline':
+            pontos = self.bsplines[idx]
+            self.bsplines[idx] = tuple(rot(x, y) for (x, y) in pontos)
         else:
             xc, yc, r = self.circles[idx]
             # círculo: só o centro rota em torno de si mesmo → permanece no lugar
@@ -219,6 +241,9 @@ class PixelCanvas:
         elif tipo == 'bezier':
             pontos = self.beziers[idx]
             self.beziers[idx] = tuple(scale(x, y) for (x, y) in pontos)
+        elif tipo == 'bspline':
+            pontos = self.bsplines[idx]
+            self.bsplines[idx] = tuple(scale(x, y) for (x, y) in pontos)
         else:
             xc, yc, r = self.circles[idx]
             self.circles[idx] = (round(xc), round(yc), round(r * max(abs(sx), abs(sy))))
@@ -247,6 +272,9 @@ class PixelCanvas:
         elif tipo == 'bezier':
             pontos = self.beziers[idx]
             self.beziers[idx] = tuple(reflect(x, y) for (x, y) in pontos)
+        elif tipo == 'bspline':
+            pontos = self.bsplines[idx]
+            self.bsplines[idx] = tuple(reflect(x, y) for (x, y) in pontos)
         else:
             xc, yc, r = self.circles[idx]
             rx, ry = reflect(xc, yc)
@@ -261,6 +289,8 @@ class PixelCanvas:
         self.lines = []
         self.circles = []
         self.beziers = []
+        self.bsplines = []
+        self.bspline_temp = []
         self.draw_clip_window()
 
     def on_click(self, event):
@@ -322,6 +352,10 @@ class PixelCanvas:
                 self.beziers.append((p0, p1, p2, p3))
                 self.points = []
                 self.redraw_all_lines()
+        elif mode == "bspline":
+            # Coleta pontos de controle; clique direito finaliza a curva (mínimo 4 pontos)
+            self.bspline_temp.append((px, py))
+            self.draw_pixel(px, py)
         else:
             r = simpledialog.askinteger("Raio", "Digite o raio (em pixels):", parent=self.root, minvalue=1, maxvalue=1000)
             if r is None:
@@ -329,6 +363,21 @@ class PixelCanvas:
             # Armazena círculo e redesenha (tratado como linha para clipping)
             self.circles.append((px, py, r))
             self.redraw_all_lines()
+
+    def on_right_click(self, event):
+        # Finaliza a B-spline em construção, se houver pontos suficientes
+        if self.mode.get() != "bspline":
+            return
+        if len(self.bspline_temp) < 4:
+            messagebox.showwarning("B-spline",
+                "São necessários pelo menos 4 pontos de controle.\n"
+                f"Pontos coletados até agora: {len(self.bspline_temp)}.",
+                parent=self.root)
+            return
+        self.bsplines.append(tuple(self.bspline_temp))
+        self.bspline_temp = []
+        self.redraw_all_lines()
+
 
     def draw_pixel(self, x, y):
         # Desenha um pixel escalado por PIXEL_SIZE
@@ -444,6 +493,25 @@ class PixelCanvas:
                     self.draw_pixel_color(px, py, "lightgray")
 
             pixels = bezier_pixels(p0, p1, p2, p3)
+            for (px, py) in pixels:
+                if WINDOW_DEFINED:
+                    if obtemCodigo(px, py) == 0:
+                        self.draw_pixel_color(px, py, cor_dentro)
+                    else:
+                        self.draw_pixel_color(px, py, "lightgray")
+                else:
+                    self.draw_pixel_color(px, py, cor_dentro)
+
+        # Desenha B-splines armazenadas
+        for i, pontos in enumerate(self.bsplines):
+            cor_dentro = "blue" if self.selected == ('bspline', i) else "black"
+
+            # Polígono de controle, em cinza claro, como referência visual
+            for (xa, ya), (xb, yb) in zip(pontos, pontos[1:]):
+                for (px, py) in bresenham_pixels(xa, ya, xb, yb):
+                    self.draw_pixel_color(px, py, "lightgray")
+
+            pixels = bspline_pixels(pontos)
             for (px, py) in pixels:
                 if WINDOW_DEFINED:
                     if obtemCodigo(px, py) == 0:
@@ -723,6 +791,109 @@ def dist_ponto_bezier(px, py, p0, p1, p2, p3, passos=NUM_PASSOS_BEZIER):
     for i in range(1, passos + 1):
         t = i / passos
         atual = bezier_ponto(t, p0, p1, p2, p3)
+        d = dist_ponto_segmento(px, py, anterior[0], anterior[1], atual[0], atual[1])
+        if d < melhor:
+            melhor = d
+        anterior = atual
+    return melhor
+
+# B-spline cúbica uniforme com vetor de nós fechado (clamped)
+#
+# Mesma ideia do exemplo de referência (scipy.interpolate.BSpline(t, c, k),
+# https://www.geeksforgeeks.org/data-analysis/b-splines-using-scipy/), onde a
+# curva é S(x) = soma_j c_j * B_{j,k}(x): os pontos de controle (c_j) são
+# ponderados por funções de base (B_{j,k}) determinadas por um vetor de nós
+# (t). Aqui o vetor de nós é gerado automaticamente e fechado nas
+# extremidades, então a curva passa pelo primeiro e pelo último ponto de
+# controle, mas tem suporte LOCAL: mover um ponto do meio só afeta a região
+# vizinha da curva, diferente da Bézier (onde mover qualquer ponto afeta a
+# curva inteira).
+
+def bspline_knots(n, p):
+    """Vetor de nós uniforme e fechado para n+1 pontos de controle e grau p."""
+    knots = [0] * (p + 1)
+    knots += list(range(1, n - p + 1))
+    knots += [n - p + 1] * (p + 1)
+    return knots
+
+def bspline_base(i, p, u, knots):
+    """Função de base B_{i,p}(u) pela recursão de Cox-de Boor."""
+    if p == 0:
+        if knots[i] <= u < knots[i + 1]:
+            return 1.0
+        # Inclui a borda direita do último intervalo (u == nó máximo)
+        if u == knots[-1] and knots[i] <= u <= knots[i + 1]:
+            return 1.0
+        return 0.0
+
+    termo1 = 0.0
+    den1 = knots[i + p] - knots[i]
+    if den1 != 0:
+        termo1 = (u - knots[i]) / den1 * bspline_base(i, p - 1, u, knots)
+
+    termo2 = 0.0
+    den2 = knots[i + p + 1] - knots[i + 1]
+    if den2 != 0:
+        termo2 = (knots[i + p + 1] - u) / den2 * bspline_base(i + 1, p - 1, u, knots)
+
+    return termo1 + termo2
+
+def bspline_ponto(u, pontos_controle, p, knots):
+    """Avalia a curva no parâmetro u: soma dos pontos de controle ponderados
+    pelas funções de base, igual à fórmula S(x) = soma c_j * B_j(x)."""
+    x = 0.0
+    y = 0.0
+    for i, (xi, yi) in enumerate(pontos_controle):
+        b = bspline_base(i, p, u, knots)
+        x += b * xi
+        y += b * yi
+    return (x, y)
+
+def bspline_pixels(pontos_controle, passos=None):
+    """B-spline cúbica uniforme definida por N pontos de controle (N >= 4).
+
+    Amostra a curva no domínio válido do vetor de nós e liga os pontos
+    consecutivos com Bresenham, do mesmo jeito que bezier_pixels.
+    """
+    n = len(pontos_controle) - 1
+    p = min(3, n)  # grau cúbico, reduzido se houver poucos pontos de controle
+    knots = bspline_knots(n, p)
+    u_min = knots[p]
+    u_max = knots[n + 1]
+
+    if passos is None:
+        passos = max(NUM_PASSOS_BEZIER, 15 * n)
+
+    amostras = []
+    for i in range(passos + 1):
+        u = u_min + (u_max - u_min) * i / passos
+        x, y = bspline_ponto(u, pontos_controle, p, knots)
+        amostras.append((round(x), round(y)))
+    # Garante que o último ponto amostrado seja exatamente o último ponto de
+    # controle (evita arredondamento na borda do último nó)
+    amostras[-1] = (round(pontos_controle[-1][0]), round(pontos_controle[-1][1]))
+
+    pixels = [amostras[0]]
+    for (xa, ya), (xb, yb) in zip(amostras, amostras[1:]):
+        pixels.extend(bresenham_pixels(xa, ya, xb, yb))
+    return pixels
+
+def dist_ponto_bspline(px, py, pontos_controle, passos=None):
+    """Distância mínima de (px, py) até a curva, por amostragem em u."""
+    n = len(pontos_controle) - 1
+    p = min(3, n)
+    knots = bspline_knots(n, p)
+    u_min = knots[p]
+    u_max = knots[n + 1]
+
+    if passos is None:
+        passos = max(NUM_PASSOS_BEZIER, 15 * n)
+
+    melhor = float('inf')
+    anterior = bspline_ponto(u_min, pontos_controle, p, knots)
+    for i in range(1, passos + 1):
+        u = u_min + (u_max - u_min) * i / passos
+        atual = bspline_ponto(u, pontos_controle, p, knots)
         d = dist_ponto_segmento(px, py, anterior[0], anterior[1], atual[0], atual[1])
         if d < melhor:
             melhor = d
