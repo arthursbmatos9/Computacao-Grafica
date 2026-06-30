@@ -1,0 +1,267 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+% babel/brazilian language file not available in this TeX install;
+% document text is already fully written in Portuguese, hyphenation
+% patterns are not essential for correctness here.
+\usepackage{amsmath,amssymb}
+\usepackage{geometry}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{titlesec}
+
+\geometry{margin=2.5cm}
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue}
+
+\lstdefinestyle{py}{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{gray},
+    stringstyle=\color{teal},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{black!3}
+}
+\lstset{style=py}
+
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
+
+\title{\textbf{TP -- Documentação Técnica}\\
+\large Curvas de Bézier e B-spline}
+\author{Arthur de Sá Braz de Matos \\ Computação Gráfica -- PUC Minas}
+\date{30 de junho de 2026}
+
+\begin{document}
+\maketitle
+
+% ============================================================
+\section{Introdução e Autoria}
+
+Este documento descreve a implementação dos algoritmos de \textbf{curvas de
+Bézier cúbicas} e \textbf{B-splines} no arquivo \texttt{tp2.py}, parte de uma
+aplicação gráfica 2D em Python/\texttt{tkinter} que também contém rasterização
+de retas (DDA, Bresenham), circunferências (Bresenham), recorte (Cohen-Sutherland,
+Liang-Barsky) e transformações geométricas (translação, rotação, escala, reflexão).
+
+Duas referências externas, citadas explicitamente nos comentários e
+docstrings do código-fonte, foram consultadas como base conceitual para os
+modelos matemáticos das curvas:
+
+\begin{itemize}
+    \item \textbf{Bézier} -- GeeksforGeeks, \emph{“Bezier Curves in OpenGL”}\\
+    \url{https://www.geeksforgeeks.org/cpp/bezier-curves-in-opengl/}\\
+    Referência para a forma polinomial explícita da cúbica de Bézier, equivalente
+    ao que o OpenGL calcula internamente via \texttt{glMap1f}/\texttt{glEvalCoord1f},
+    e para a amostragem em $t = i/30$ usada com \texttt{glBegin(GL\_LINE\_STRIP)}.
+
+    \item \textbf{B-spline} -- GeeksforGeeks, \emph{“B-splines using SciPy”}\\
+    \url{https://www.geeksforgeeks.org/data-analysis/b-splines-using-scipy/}\\
+    Referência para a formulação geral $S(x) = \sum_j c_j B_{j,k}(x)$ usada por
+    \texttt{scipy.interpolate.BSpline(t, c, k)}, isto é, pontos de controle
+    ($c_j$) ponderados por funções de base ($B_{j,k}$) determinadas por um vetor
+    de nós ($t$).
+\end{itemize}
+
+% ============================================================
+\section{Organização do Código}
+
+O arquivo \texttt{tp2.py} está organizado em três grandes blocos:
+
+\begin{enumerate}
+    \item \textbf{Classe \texttt{PixelCanvas}} -- interface gráfica (\texttt{tkinter}),
+    estado da aplicação (listas \texttt{lines}, \texttt{circles}, \texttt{beziers},
+    \texttt{bsplines}), tratamento de eventos de mouse, seleção de objetos e
+    aplicação de transformações geométricas.
+
+    \item \textbf{Funções de rasterização e geometria (nível de módulo)} --
+    algoritmos independentes da interface: DDA, Bresenham (reta e
+    circunferência), recorte (Cohen-Sutherland e Liang-Barsky), e as funções
+    matemáticas de Bézier e B-spline detalhadas neste documento.
+
+    \item \textbf{Função \texttt{main()}} -- inicializa a janela Tk e o
+    \texttt{PixelCanvas}.
+\end{enumerate}
+
+\subsection{Funções relacionadas a Bézier e B-spline}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Função} & \textbf{Responsabilidade} \\
+\midrule
+\texttt{bezier\_ponto(t, p0, p1, p2, p3)} & Avalia $B(t)$ pela forma de Bernstein \\
+\texttt{bezier\_pixels(...)} & Amostra a curva e rasteriza com Bresenham \\
+\texttt{dist\_ponto\_bezier(...)} & Distância ponto--curva (suporte à seleção) \\
+\texttt{bspline\_knots(n, p)} & Gera o vetor de nós uniforme fechado \\
+\texttt{bspline\_base(i, p, u, knots)} & Função de base $B_{i,p}(u)$ (Cox-de Boor) \\
+\texttt{bspline\_ponto(u, ...)} & Avalia $C(u) = \sum_i P_i B_{i,p}(u)$ \\
+\texttt{bspline\_pixels(...)} & Amostra a curva e rasteriza com Bresenham \\
+\texttt{dist\_ponto\_bspline(...)} & Distância ponto--curva (suporte à seleção) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Ambas as curvas compartilham o mesmo padrão de projeto: uma função
+\texttt{\_ponto} que avalia matematicamente um ponto da curva para um dado
+parâmetro, uma função \texttt{\_pixels} que amostra esse parâmetro em
+intervalos discretos e liga os pontos resultantes com \texttt{bresenham\_pixels}
+(reaproveitando o algoritmo de rasterização de retas já implementado), e uma
+função \texttt{dist\_ponto\_} que reaproveita essa mesma amostragem para
+calcular a distância mínima até um clique do mouse, usada na seleção de
+objetos (\texttt{selecionar\_objeto}).
+
+% ============================================================
+\section{Modelo Matemático -- Curva de Bézier Cúbica}
+
+\subsection{Definição}
+
+Uma curva de Bézier cúbica é definida por 4 pontos de controle
+$P_0, P_1, P_2, P_3 \in \mathbb{R}^2$ e parâmetro $t \in [0,1]$:
+
+\begin{equation}
+B(t) = (1-t)^3 P_0 \;+\; 3(1-t)^2 t\, P_1 \;+\; 3(1-t) t^2 P_2 \;+\; t^3 P_3
+\label{eq:bezier}
+\end{equation}
+
+Os coeficientes $(1-t)^3,\ 3(1-t)^2t,\ 3(1-t)t^2,\ t^3$ são os \textbf{polinômios
+de Bernstein} de grau 3, que somam $1$ para qualquer $t$ e garantem que $B(t)$
+é sempre uma combinação convexa dos pontos de controle -- por isso a curva
+sempre fica contida no fecho convexo de $P_0,\dots,P_3$ (propriedade do
+\emph{convex hull}), e interpola exatamente $P_0$ em $t=0$ e $P_3$ em $t=1$,
+sem necessariamente passar pelos pontos intermediários.
+
+\subsection{Implementação (\texttt{bezier\_ponto})}
+
+A Equação~\ref{eq:bezier} é aplicada componente a componente ($x$ e $y$
+separadamente), exatamente na forma polinomial explícita -- e não pelo
+algoritmo recursivo de De Casteljau (geometricamente equivalente, mas que
+calcula a curva por interpolações lineares sucessivas em vez da expansão
+fechada dos coeficientes de Bernstein). A escolha da forma explícita segue
+diretamente o exemplo de referência do OpenGL citado na Seção~1, em que o
+driver avalia o mesmo polinômio internamente via \texttt{glEvalCoord1f}.
+
+\begin{lstlisting}[caption={Avaliação da curva de Bézier}]
+def bezier_ponto(t, p0, p1, p2, p3):
+    x = ((1-t)**3)*p0[0] + 3*((1-t)**2)*t*p1[0] \
+        + 3*(1-t)*(t**2)*p2[0] + (t**3)*p3[0]
+    y = ((1-t)**3)*p0[1] + 3*((1-t)**2)*t*p1[1] \
+        + 3*(1-t)*(t**2)*p2[1] + (t**3)*p3[1]
+    return (x, y)
+\end{lstlisting}
+
+\subsection{Amostragem e rasterização (\texttt{bezier\_pixels})}
+
+Como o canvas trabalha em pixels discretos, a curva contínua $B(t)$ precisa
+ser aproximada por um conjunto finito de segmentos de reta. A implementação
+divide $t \in [0,1]$ em \texttt{NUM\_PASSOS\_BEZIER = 30} subintervalos iguais
+(equivalente ao laço \texttt{i / 30.0} do exemplo OpenGL de referência),
+avalia $B(t_i)$ em cada um, arredonda para coordenadas de pixel e liga os
+pontos consecutivos com \texttt{bresenham\_pixels} -- reproduzindo em software
+o que o \texttt{glBegin(GL\_LINE\_STRIP)} faz via hardware/driver.
+
+\begin{equation}
+t_i = \frac{i}{30}, \quad i = 0,1,\dots,30
+\end{equation}
+
+O polígono de controle ($P_0$--$P_1$, $P_1$--$P_2$, $P_2$--$P_3$) é desenhado
+em cinza claro como referência visual antes da curva propriamente dita.
+
+
+% ============================================================
+\section{Modelo Matemático -- B-spline}
+
+\subsection{Vetor de nós fechado (\textit{clamped})}
+
+Para $n+1$ pontos de controle e grau $p$ (cúbico, $p=3$, quando há pontos
+suficientes), o vetor de nós usado é:
+
+\begin{equation}
+\underbrace{0,\dots,0}_{p+1} \;,\; 1, 2, \dots, n-p \;,\; \underbrace{n-p+1,\dots,n-p+1}_{p+1}
+\end{equation}
+
+implementado em \texttt{bspline\_knots(n, p)}. A multiplicidade $p+1$ nas
+extremidades (em vez de nós simples) é o que torna o vetor \emph{fechado}: ela
+força a curva a interpolar exatamente o primeiro e o último ponto de
+controle -- diferindo de uma B-spline uniforme não fechada, que em geral não
+passa pelas extremidades do polígono de controle.
+
+\subsection{Funções de base -- recursão de Cox-de~Boor}
+
+A função de base $B_{i,p}(u)$ é definida recursivamente:
+
+\textbf{Caso base ($p=0$):}
+\begin{equation}
+B_{i,0}(u) = \begin{cases} 1 & \text{se } u_i \le u < u_{i+1} \\ 0 & \text{caso contrário} \end{cases}
+\end{equation}
+
+\textbf{Caso recursivo ($p>0$):}
+\begin{equation}
+B_{i,p}(u) = \frac{u - u_i}{u_{i+p} - u_i}\, B_{i,p-1}(u) \;+\; \frac{u_{i+p+1} - u}{u_{i+p+1} - u_{i+1}}\, B_{i+1,p-1}(u)
+\label{eq:coxdeboor}
+\end{equation}
+
+(com a convenção de que qualquer termo cujo denominador seja zero é tratado
+como zero, evitando divisão por zero quando nós coincidem). Esta é exatamente
+a recursão usada implicitamente por \texttt{scipy.interpolate.BSpline}, citada
+na referência da Seção~1, aqui implementada manualmente em
+\texttt{bspline\_base}.
+
+\subsection{Curva resultante}
+
+A curva é a soma dos pontos de controle ponderados pelas funções de base,
+seguindo diretamente a forma geral $S(x) = \sum_j c_j B_{j,k}(x)$ da
+referência:
+
+\begin{equation}
+C(u) = \sum_{i=0}^{n} P_i \, B_{i,p}(u), \qquad u \in [u_p,\, u_{n+1}]
+\label{eq:bspline}
+\end{equation}
+
+implementada em \texttt{bspline\_ponto}, percorrendo todos os pontos de
+controle e acumulando $x$ e $y$ separadamente.
+
+% ============================================================
+\section{Manual de Uso}
+
+\subsection{Iniciando a aplicação}
+Execute \texttt{python tp2.py}. Uma janela com um canvas de
+$256 \times 150$ pixels (escalados por um fator de 5) e painéis de controle é
+aberta.
+
+\subsection{Desenhando uma curva de Bézier}
+\begin{enumerate}
+    \item Selecione o modo \textbf{Bézier} no painel “Desenho”.
+    \item Clique no canvas 4 vezes, definindo, em ordem, $P_0$, $P_1$, $P_2$ e
+    $P_3$.
+    \item Após o 4º clique, a curva é desenhada automaticamente, junto do
+    polígono de controle em cinza claro.
+\end{enumerate}
+
+\subsection{Desenhando uma B-spline}
+\begin{enumerate}
+    \item Selecione o modo \textbf{B-spline}.
+    \item Clique no canvas com o botão esquerdo para adicionar pontos de
+    controle (quantos forem necessários, mínimo de 4).
+    \item Clique com o \textbf{botão direito} para finalizar a curva. Se
+    houver menos de 4 pontos, um aviso é exibido e a curva não é criada.
+\end{enumerate}
+
+% ============================================================
+\section{Referências}
+
+\begin{enumerate}
+    \item GeeksforGeeks. \emph{Bezier Curves in OpenGL}. Disponível em:
+    \url{https://www.geeksforgeeks.org/cpp/bezier-curves-in-opengl/}.
+    \item GeeksforGeeks. \emph{B-splines using SciPy}. Disponível em:
+    \url{https://www.geeksforgeeks.org/data-analysis/b-splines-using-scipy/}.
+\end{enumerate}
+
+\end{document}

@@ -821,7 +821,10 @@ def bspline_base(i, p, u, knots):
     if p == 0:
         if knots[i] <= u < knots[i + 1]:
             return 1.0
-        # Inclui a borda direita do último intervalo (u == nó máximo)
+        # Inclui a borda direita do último intervalo (u == nó máximo).
+        # Sem este caso especial, a definição padrão (meio-aberta à direita)
+        # zeraria todas as bases exatamente em u_max, fazendo a curva "sumir"
+        # no último ponto amostrado.
         if u == knots[-1] and knots[i] <= u <= knots[i + 1]:
             return 1.0
         return 0.0
@@ -862,6 +865,9 @@ def bspline_pixels(pontos_controle, passos=None):
     u_max = knots[n + 1]
 
     if passos is None:
+        # Amostragem adaptativa: cresce com o número de pontos de controle
+        # (15 amostras por ponto), para que curvas com mais segmentos no
+        # vetor de nós não fiquem poligonais por falta de resolução.
         passos = max(NUM_PASSOS_BEZIER, 15 * n)
 
     amostras = []
